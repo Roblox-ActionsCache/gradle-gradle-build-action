@@ -331,10 +331,12 @@ function downloadCache(archiveLocation, archivePath, options) {
         if (downloadOptions.useAzureSdk &&
             archiveUrl.hostname.endsWith('.blob.core.windows.net')) {
             // Use Azure storage SDK to download caches hosted on Azure to improve speed and reliability.
+            core.info('Downloading cache entry using Azure storage SDK')
             yield downloadUtils_1.downloadCacheStorageSDK(archiveLocation, archivePath, downloadOptions);
         }
         else {
             // Otherwise, download using the Actions http-client.
+            core.info('Downloading cache entry using Actions http-client')
             yield downloadUtils_1.downloadCacheHttpClient(archiveLocation, archivePath);
         }
     });
@@ -65545,6 +65547,10 @@ class CacheEntryListener {
         this.restoredSize = size;
         return this;
     }
+    markUnrestored(message) {
+        this.unrestored = message;
+        return this;
+    }
     markSaved(key, size) {
         this.savedKey = key;
         this.savedSize = size;
@@ -65609,6 +65615,9 @@ function renderEntryDetails(listener) {
         .join('---\n');
 }
 function getRestoredMessage(entry, cacheWriteOnly) {
+    if (entry.unrestored) {
+        return `(Entry not restored: ${entry.unrestored})`;
+    }
     if (cacheWriteOnly) {
         return '(Entry not restored: cache is write-only)';
     }
@@ -65729,6 +65738,9 @@ function isCacheDebuggingEnabled() {
     return process.env[CACHE_DEBUG_VAR] ? true : false;
 }
 exports.isCacheDebuggingEnabled = isCacheDebuggingEnabled;
+function getCacheTimeoutMs() {
+    return 2 * 60 * 1000;
+}
 class CacheKey {
     constructor(key, restoreKeys) {
         this.key = key;
@@ -65785,14 +65797,21 @@ exports.hashStrings = hashStrings;
 function restoreCache(cachePath, cacheKey, cacheRestoreKeys, listener) {
     return __awaiter(this, void 0, void 0, function* () {
         listener.markRequested(cacheKey, cacheRestoreKeys);
+        const timeoutError = new Error('Timeout');
         try {
-            const restoredEntry = yield cache.restoreCache(cachePath, cacheKey, cacheRestoreKeys);
+            const restoreOperation = cache.restoreCache(cachePath, cacheKey, cacheRestoreKeys);
+            const timeout = new Promise((_resolve, reject) => setTimeout(() => reject(timeoutError), getCacheTimeoutMs()));
+            const timeoutRestore = Promise.race([restoreOperation, timeout]);
+            const restoredEntry = (yield timeoutRestore);
             if (restoredEntry !== undefined) {
                 listener.markRestored(restoredEntry.key, restoredEntry.size);
             }
             return restoredEntry;
         }
         catch (error) {
+            if (error === timeoutError) {
+                listener.markUnrestored('Timeout');
+            }
             handleCacheFailure(error, `Failed to restore ${cacheKey}`);
             return undefined;
         }
@@ -65801,11 +65820,18 @@ function restoreCache(cachePath, cacheKey, cacheRestoreKeys, listener) {
 exports.restoreCache = restoreCache;
 function saveCache(cachePath, cacheKey, listener) {
     return __awaiter(this, void 0, void 0, function* () {
+        const timeoutError = new Error('Timeout');
         try {
-            const savedEntry = yield cache.saveCache(cachePath, cacheKey);
+            const saveOperation = cache.saveCache(cachePath, cacheKey);
+            const timeout = new Promise((_resolve, reject) => setTimeout(() => reject(timeoutError), getCacheTimeoutMs()));
+            const timeoutSave = Promise.race([saveOperation, timeout]);
+            const savedEntry = (yield timeoutSave);
             listener.markSaved(savedEntry.key, savedEntry.size);
         }
         catch (error) {
+            if (error === timeoutError) {
+                listener.markUnsaved('Timeout');
+            }
             if (error instanceof cache.ReserveCacheError) {
                 listener.markAlreadyExists(cacheKey);
             }
