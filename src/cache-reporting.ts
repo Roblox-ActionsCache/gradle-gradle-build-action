@@ -66,6 +66,7 @@ export class CacheEntryListener {
     savedKey: string | undefined
     savedSize: number | undefined
 
+    unrestored: string | undefined
     unsaved: string | undefined
 
     constructor(entryName: string) {
@@ -85,6 +86,11 @@ export class CacheEntryListener {
     markRestored(key: string, size: number | undefined): CacheEntryListener {
         this.restoredKey = key
         this.restoredSize = size
+        return this
+    }
+
+    markUnrestored(message: string): CacheEntryListener {
+        this.unrestored = message
         return this
     }
 
@@ -166,6 +172,9 @@ function renderEntryDetails(listener: CacheListener): string {
 }
 
 function getRestoredMessage(entry: CacheEntryListener, cacheWriteOnly: boolean): string {
+    if (entry.unrestored) {
+        return `(Entry not restored: ${entry.unrestored})`
+    }
     if (cacheWriteOnly) {
         return '(Entry not restored: cache is write-only)'
     }

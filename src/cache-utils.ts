@@ -43,6 +43,10 @@ export function isCacheDebuggingEnabled(): boolean {
     return process.env[CACHE_DEBUG_VAR] ? true : false
 }
 
+function getCacheTimeoutMs(): number {
+    return 2 * 60 * 1000 // 2 minutes
+}
+
 /**
  * Represents a key used to restore a cache entry.
  * The Github Actions cache will first try for an exact match on the key.
@@ -147,23 +151,39 @@ export async function restoreCache(
     listener: CacheEntryListener
 ): Promise<cache.CacheEntry | undefined> {
     listener.markRequested(cacheKey, cacheRestoreKeys)
+    const timeoutError = new Error('Timeout')
     try {
-        const restoredEntry = await cache.restoreCache(cachePath, cacheKey, cacheRestoreKeys)
+        const restoreOperation = cache.restoreCache(cachePath, cacheKey, cacheRestoreKeys)
+        const timeout = new Promise((_resolve, reject) => setTimeout(() => reject(timeoutError), getCacheTimeoutMs()))
+        const timeoutRestore = Promise.race([restoreOperation, timeout])
+
+        const restoredEntry = (await timeoutRestore) as cache.CacheEntry
         if (restoredEntry !== undefined) {
             listener.markRestored(restoredEntry.key, restoredEntry.size)
         }
         return restoredEntry
     } catch (error) {
+        if (error === timeoutError) {
+            listener.markUnrestored('Timeout')
+        }
         handleCacheFailure(error, `Failed to restore ${cacheKey}`)
         return undefined
     }
 }
 
 export async function saveCache(cachePath: string[], cacheKey: string, listener: CacheEntryListener): Promise<void> {
+    const timeoutError = new Error('Timeout')
     try {
-        const savedEntry = await cache.saveCache(cachePath, cacheKey)
+        const saveOperation = cache.saveCache(cachePath, cacheKey)
+        const timeout = new Promise((_resolve, reject) => setTimeout(() => reject(timeoutError), getCacheTimeoutMs()))
+        const timeoutSave = Promise.race([saveOperation, timeout])
+
+        const savedEntry = (await timeoutSave) as cache.CacheEntry
         listener.markSaved(savedEntry.key, savedEntry.size)
     } catch (error) {
+        if (error === timeoutError) {
+            listener.markUnsaved('Timeout')
+        }
         if (error instanceof cache.ReserveCacheError) {
             listener.markAlreadyExists(cacheKey)
         }
