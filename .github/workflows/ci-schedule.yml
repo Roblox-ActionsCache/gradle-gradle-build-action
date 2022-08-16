@@ -1,7 +1,7 @@
 name: Experiment
 on: 
   schedule:
-  - cron: '*/5 * * * *'
+  - cron: '0/5 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -12,3 +12,7 @@ jobs:
     steps:
     - name: Emit warning
       run: echo "::warning ::Test Warning"
+    - name: Dump GitHub context
+      env:
+        GITHUB_CONTEXT: ${{ toJSON(github) }}
+      run: echo "$GITHUB_CONTEXT"
